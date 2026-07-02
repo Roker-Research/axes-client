@@ -4,33 +4,39 @@ build-backend = "hatchling.build"
 
 [project]
 name = "axes-client"
-version = "0.1.0"
-description = "Python client for the Axes data API"
+version = "0.2.0"
+description = "Python client for the Axes data API, and the axes.agent framework"
 readme = "README.md"
 authors = [
     { name = "Axes, Inc.", email = "info@axes.com" },
 ]
 license = { text = "MIT" }
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.27",
     "polars>=1.0",
     "click>=8.1",
     "pyarrow>=24.0.0",
+    "pydantic>=2.7",
+    "jinja2>=3.1",
 ]
 
 [project.scripts]
 axes = "axes.cli:main"
+# Container entrypoint for the agent framework (axes.agent).
+axes-agent = "axes.agent.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/axes"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "tests"]
+asyncio_mode = "auto"
 
 [dependency-groups]
 dev = [
     "pytest",
     "pytest-httpx",
+    "pytest-asyncio",
 ]
 

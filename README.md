@@ -107,6 +107,22 @@ except AuthError as e:
     print(e.status_code)  # 401 or 403
 ```
 
+## Agent framework
+
+`axes.agent` is the container-side framework for authoring [Chat
+Plot](../chat-plot) agents. Agents already read the data catalog through this
+client, so the framework ships here rather than as a separate package.
+
+```python
+from axes.agent import Agent, Tool, RunContext
+```
+
+Author an agent as an `Agent` subclass with `Tool` members (and other `Agent`
+instances as subagents); the `axes-agent` console script reads one step off
+stdin, runs `plan_step` or `run_tool`, and writes the result to stdout. Chat
+Plot drives the multi-turn loop and owns the LLM call, persistence, and
+streaming. See [`weather-agent`](../weather-agent) for a worked example.
+
 ## Development
 
 ```sh
