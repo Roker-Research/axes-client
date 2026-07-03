@@ -2,8 +2,11 @@ from axes.agent import Complete, Finish, Message
 from axes.agent.protocol import (
     PlanStepRequest,
     RunToolRequest,
+    SubagentStart,
+    ToolResult,
     plan_result_adapter,
     request_adapter,
+    run_tool_result_adapter,
 )
 
 
@@ -68,3 +71,24 @@ def test_extra_fields_are_rejected() -> None:
 
     with pytest.raises(ValidationError):
         request_adapter.validate_json('{"verb":"plan_step","bogus":1}')
+
+
+def test_run_tool_result_discriminates_by_kind() -> None:
+    start = SubagentStart(
+        name="child",
+        plan=Complete(messages=[], user_message='{"x":1}'),
+    )
+    restored = run_tool_result_adapter.validate_json(start.model_dump_json())
+    assert isinstance(restored, SubagentStart)
+    assert isinstance(restored.plan, Complete)
+    assert restored.plan.user_message == '{"x":1}'
+
+    result = run_tool_result_adapter.validate_json(
+        ToolResult(content={"y": 1}).model_dump_json()
+    )
+    assert isinstance(result, ToolResult)
+    assert result.content == {"y": 1}
+
+
+def test_user_message_defaults_to_none_on_complete() -> None:
+    assert Complete(messages=[]).user_message is None

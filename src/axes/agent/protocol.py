@@ -7,7 +7,10 @@ stdin and reads one JSON result on stdout. There are two verbs:
   provider-neutral ``messages`` array) and returns a ``PlanResult`` — one of
   ``Complete`` (run the LLM), ``Message`` (a procedurally produced assistant
   message), or ``Finish`` (the run is done).
-- ``run_tool`` receives one leaf tool call and returns a ``ToolResult``.
+- ``run_tool`` receives one tool call. A leaf tool is executed and returns a
+  ``ToolResult``; a call that targets a subagent returns a ``SubagentStart``
+  instead — the subagent's name plus its first ``plan_step`` — and Chat Plot
+  launches the child chat from it.
 
 Everything here maps onto Chat Plot's ``Message`` / ``ToolCall`` data model.
 The framework never calls the LLM, persists anything, or streams — those are
@@ -59,9 +62,10 @@ class ToolSpec(BaseModel):
     """A tool definition returned to Chat Plot in a ``Complete``.
 
     ``parameters`` is the JSON schema Chat Plot hands to the LLM as the
-    function definition. ``kind`` tells Chat Plot how to dispatch a call to
-    this tool: ``leaf`` becomes a ``run_tool`` invocation; ``subagent`` becomes
-    a child chat named ``subagent_name``.
+    function definition. Chat Plot dispatches every resulting call back to
+    the container as a ``run_tool``; whether the target is a leaf tool or a
+    subagent is the container's own knowledge, reported at execution time
+    (see ``SubagentStart``).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -69,24 +73,33 @@ class ToolSpec(BaseModel):
     name: str
     description: str
     parameters: dict[str, Any] = Field(default_factory=dict)
-    kind: Literal["leaf", "subagent"] = "leaf"
-    subagent_name: str | None = None
 
 
 # --- plan_step results -----------------------------------------------------
 
 
 # A ``plan_step`` result may carry the agent's **output** — the value that
-# becomes the parent tool call's ``content`` (validated by Chat Plot against
-# the agent's ``content_schema``). Every step writes the same slot; the name
-# marks how settled it is. While the run is in progress it is provisional,
-# ``state`` (on ``Complete`` / ``Message``); at ``Finish`` it is authoritative
-# and named ``content``, matching where it lands. ``run_tool`` cannot set it —
-# a leaf tool never sees history, so it can't form the agent's belief.
+# becomes the parent tool call's ``content``. Every step writes the same
+# slot; the name marks how settled it is. While the run is in progress it is
+# provisional, ``state`` (on ``Complete`` / ``Message``); at ``Finish`` it is
+# authoritative and named ``content``, matching where it lands. ``run_tool``
+# cannot set it — a leaf tool never sees history, so it can't form the
+# agent's belief.
 
 
 class Complete(BaseModel):
-    """Ask Chat Plot to run the LLM on this (mutated) messages array."""
+    """Ask Chat Plot to run the LLM on this (mutated) messages array.
+
+    ``messages`` is the ephemeral LLM view — the agent rebuilds it every
+    step (system prompt, history, transient nudges) and Chat Plot persists
+    none of it. To persist a user turn, set ``user_message``: Chat Plot
+    stores it as the chat's next user message (so it enters history and the
+    UI) and then runs this completion. This is how an agent authors the
+    opening prompt of its own run from its invocation arguments — carried on
+    the same step that plans the first completion, so no extra container boot
+    is spent on it. The same text should also appear in ``messages`` (the
+    LLM must see it this turn); on later steps it returns through history.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -95,12 +108,21 @@ class Complete(BaseModel):
     tools: list[ToolSpec] = Field(default_factory=list)
     model: str | None = None
     reasoning_effort: str | None = None
+    #: A user message to persist before running this completion (e.g. the
+    #: opening prompt authored from invocation arguments). Unlike the entries
+    #: in ``messages``, this is stored to history.
+    user_message: str | None = None
     #: Provisional agent output so far (the parent tool call content).
     state: dict[str, Any] | None = None
 
 
 class Message(BaseModel):
-    """A ready-made assistant message from a procedural agent (no LLM call)."""
+    """A ready-made assistant message from the agent (no LLM call).
+
+    A procedurally produced assistant turn, optionally carrying tool calls.
+    To author a *user* turn, set ``user_message`` on ``Complete`` instead —
+    that persists the turn and runs the next completion in one step.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -119,8 +141,8 @@ class Finish(BaseModel):
 
     action: Literal["finish"] = "finish"
     reason: str | None = None
-    #: The agent's terminal output (the parent tool call content). When
-    #: ``None``, Chat Plot derives it from the last assistant message.
+    #: The agent's terminal output (the parent tool call content). The agent
+    #: must supply it; Chat Plot settles a contentless finish as an error.
     content: dict[str, Any] | None = None
 
 
@@ -131,16 +153,42 @@ type PlanResult = Annotated[
 plan_result_adapter: TypeAdapter[PlanResult] = TypeAdapter(PlanResult)
 
 
-# --- run_tool result -------------------------------------------------------
+# --- run_tool results --------------------------------------------------------
 
 
 class ToolResult(BaseModel):
-    """The outcome of a ``run_tool`` invocation."""
+    """The outcome of a ``run_tool`` invocation on a leaf tool."""
 
     model_config = ConfigDict(extra="forbid")
 
+    kind: Literal["tool"] = "tool"
     content: dict[str, Any] | None = None
     error: str | None = None
+
+
+class SubagentStart(BaseModel):
+    """``run_tool`` addressed a subagent, not a leaf tool.
+
+    The entrypoint does not execute the subagent. It reports the subagent's
+    ``name`` (Chat Plot creates a child chat under it) together with the
+    subagent's first ``plan_step`` — computed on empty history with the
+    call's arguments bound — so the launch costs no extra container boot.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["subagent"] = "subagent"
+    name: str
+    plan: PlanResult
+
+
+type RunToolResult = Annotated[
+    ToolResult | SubagentStart, Field(discriminator="kind")
+]
+
+run_tool_result_adapter: TypeAdapter[RunToolResult] = TypeAdapter(
+    RunToolResult
+)
 
 
 # --- requests (stdin) ------------------------------------------------------
@@ -156,7 +204,6 @@ class PlanStepRequest(BaseModel):
     #: The invocation arguments this agent's chat was created with (frozen for
     #: the chat's life), matching the agent's ``arguments_schema``.
     arguments: dict[str, Any] = Field(default_factory=dict)
-    config: dict[str, Any] = Field(default_factory=dict)
 
 
 class RunToolRequest(BaseModel):
@@ -167,7 +214,6 @@ class RunToolRequest(BaseModel):
     chat_id: str | None = None
     tool_call: ToolCall
     arguments: dict[str, Any] = Field(default_factory=dict)
-    config: dict[str, Any] = Field(default_factory=dict)
 
 
 type Request = Annotated[

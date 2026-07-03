@@ -53,7 +53,6 @@ def test_default_plan_step_builds_complete_from_user() -> None:
     assert result.messages[0].role == "system"
     assert result.messages[0].content == "You are a test agent."
     assert [t.name for t in result.tools] == ["echo"]
-    assert result.tools[0].kind == "leaf"
 
 
 def test_default_plan_step_continues_after_tool_result() -> None:
@@ -64,6 +63,7 @@ def test_default_plan_step_continues_after_tool_result() -> None:
 def test_default_done_on_assistant_without_tools() -> None:
     result = Bare().plan_step(_msgs(("user", False), ("assistant", False)))
     assert isinstance(result, Finish)
+    assert result.content == {"text": "x"}
 
 
 def test_nudge_is_injected() -> None:
@@ -176,6 +176,38 @@ def test_agent_without_schema_binds_raw_dict() -> None:
     agent = Bare()
     agent.bind_arguments({"anything": 1})
     assert agent.arguments == {"anything": 1}
+
+
+def test_default_plan_step_opens_with_user_message() -> None:
+    agent = Contracted()
+    agent.bind_arguments({"ticker": "ZS"})
+    result = agent.plan_step([])
+    assert isinstance(result, Complete)
+    assert result.user_message == '{"ticker":"ZS","horizon":30}'
+    assert result.messages[-1].role == "user"
+    assert result.messages[-1].content == '{"ticker":"ZS","horizon":30}'
+
+
+def test_default_initial_message_dumps_raw_arguments() -> None:
+    agent = Bare()
+    agent.bind_arguments({"anything": 1})
+    result = agent.plan_step([])
+    assert isinstance(result, Complete)
+    assert result.user_message == '{"anything": 1}'
+
+
+def test_initial_message_override() -> None:
+    class Greeter(Contracted):
+        name = "greeter"
+
+        def initial_message(self) -> str:
+            return f"Forecast {self.arguments.ticker}, please."
+
+    agent = Greeter()
+    agent.bind_arguments({"ticker": "ZC"})
+    result = agent.plan_step([])
+    assert isinstance(result, Complete)
+    assert result.user_message == "Forecast ZC, please."
 
 
 def test_name_defaults_to_class_name() -> None:

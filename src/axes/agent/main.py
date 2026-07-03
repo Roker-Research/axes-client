@@ -21,8 +21,10 @@ from pydantic import BaseModel
 from axes.agent.agent import Agent
 from axes.agent.context import RunContext
 from axes.agent.protocol import (
+    ChatMessage,
     ErrorEnvelope,
     PlanStepRequest,
+    SubagentStart,
     request_adapter,
 )
 
@@ -73,10 +75,27 @@ def flatten(root: Agent) -> dict[str, Agent]:
     return registry
 
 
+async def plan(
+    agent: Agent,
+    messages: list[ChatMessage],
+    arguments: dict[str, Any],
+) -> BaseModel:
+    """Bind arguments and run one ``plan_step``."""
+    agent.bind_arguments(arguments)
+    planned: Any = agent.plan_step(messages)
+    if inspect.isawaitable(planned):
+        planned = await planned
+    assert isinstance(planned, BaseModel)
+    return planned
+
+
 async def _dispatch(raw: str, root: Agent) -> str:
     """Validate one request, select the agent, run the step, return JSON.
 
-    Pure (no I/O): the entrypoint's testable core.
+    Pure (no I/O): the entrypoint's testable core. A ``run_tool`` whose
+    target is a subagent is not executed; it returns a ``SubagentStart``
+    carrying the subagent's first ``plan_step`` on empty history, computed
+    with the call's arguments bound.
     """
     registry = flatten(root)
     req = request_adapter.validate_json(raw)
@@ -91,17 +110,15 @@ async def _dispatch(raw: str, root: Agent) -> str:
 
     result: BaseModel
     if isinstance(req, PlanStepRequest):
-        agent.bind_arguments(req.arguments)
-        planned: Any = agent.plan_step(req.messages)
-        if inspect.isawaitable(planned):
-            planned = await planned
-        assert isinstance(planned, BaseModel)
-        result = planned
+        result = await plan(agent, req.messages, req.arguments)
     else:
-        ctx = RunContext.from_config(
-            req.config, chat_id=req.chat_id, arguments=req.arguments
-        )
-        result = await agent.run_tool(req.tool_call, ctx)
+        target = agent.tools.get(req.tool_call.name)
+        if isinstance(target, Agent):
+            first_plan = await plan(target, [], req.tool_call.arguments)
+            result = SubagentStart(name=target.name, plan=first_plan)
+        else:
+            ctx = RunContext(chat_id=req.chat_id, arguments=req.arguments)
+            result = await agent.run_tool(req.tool_call, ctx)
     return result.model_dump_json()
 
 

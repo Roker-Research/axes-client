@@ -53,13 +53,6 @@ def _specs() -> dict:
     return {s.name: s for s in Parent().tool_specs()}
 
 
-def test_leaf_and_subagent_kinds() -> None:
-    specs = _specs()
-    assert specs["ping"].kind == "leaf"
-    assert specs["child"].kind == "subagent"
-    assert specs["child"].subagent_name == "child"
-
-
 def test_subagent_params_come_from_child_contract() -> None:
     spec = _specs()["typed_child"]
     assert "topic" in spec.parameters["properties"]

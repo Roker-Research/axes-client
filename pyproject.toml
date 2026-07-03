@@ -30,7 +30,10 @@ axes-agent = "axes.agent.main:main"
 packages = ["src/axes"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src", "tests"]
+pythonpath = [
+    "src",
+    "tests",
+]
 asyncio_mode = "auto"
 
 [dependency-groups]
@@ -39,4 +42,3 @@ dev = [
     "pytest-httpx",
     "pytest-asyncio",
 ]
-

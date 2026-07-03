@@ -16,7 +16,8 @@ process.
 from __future__ import annotations
 
 import inspect
-from typing import Any, ClassVar, Literal
+import json
+from typing import Any, ClassVar
 
 from jinja2 import Template
 from pydantic import BaseModel
@@ -135,23 +136,31 @@ class Agent:
         """An optional user message to inject before the next completion."""
         return None
 
+    def initial_message(self) -> str:
+        """The run's opening user message, authored from the invocation
+        arguments. The default ``plan_step`` carries it as ``user_message``
+        on the first ``Complete`` when history is empty; the default
+        rendering is the arguments as JSON."""
+        if self._arguments is None:
+            return ""
+        if isinstance(self._arguments, BaseModel):
+            return self._arguments.model_dump_json()
+        return json.dumps(self._arguments)
+
     def tool_specs(self) -> list[ToolSpec]:
         specs: list[ToolSpec] = []
         for name, tool in self.tools.items():
-            kind: Literal["leaf", "subagent"]
             schema: type[BaseModel] | None
             description: str
             if isinstance(tool, Agent):
                 # A subagent's parameters are its own input contract; it reads
                 # to the model by its own description.
-                kind, subagent_name = "subagent", tool.name
                 schema = tool.arguments_schema or PromptArgs
                 description = (
                     tool.description
                     or f"Delegate a task to the {tool.name} subagent."
                 )
             else:
-                kind, subagent_name = "leaf", None
                 schema = tool.arguments_schema
                 description = tool.description
             parameters = (
@@ -162,8 +171,6 @@ class Agent:
                     name=name,
                     description=description,
                     parameters=parameters,
-                    kind=kind,
-                    subagent_name=subagent_name,
                 )
             )
         return specs
@@ -171,9 +178,35 @@ class Agent:
     # -- the step verbs -----------------------------------------------------
 
     def plan_step(self, messages: list[ChatMessage]) -> PlanResult:
-        """Decide the next message (override for procedural agents)."""
+        """Decide the next message (override for procedural agents).
+
+        The default finish carries the last assistant message as
+        ``{"text": ...}``; override ``plan_step`` (or intercept ``done``) to
+        return structured ``Finish`` content instead.
+        """
+        if not messages:
+            opener = self.initial_message()
+            return Complete(
+                messages=[
+                    ChatMessage(role="system", content=self.system_prompt()),
+                    ChatMessage(role="user", content=opener),
+                ],
+                tools=self.tool_specs(),
+                model=self.model,
+                reasoning_effort=self.reasoning_effort,
+                user_message=opener,
+            )
         if self.done(messages):
-            return Finish()
+            final_message = next(
+                (
+                    message
+                    for message in reversed(messages)
+                    if message.role == "assistant" and message.content
+                ),
+                None,
+            )
+            final_text = final_message.content if final_message else ""
+            return Finish(content={"text": final_text or ""})
         convo: list[ChatMessage] = [
             ChatMessage(role="system", content=self.system_prompt()),
             *messages,
@@ -195,8 +228,8 @@ class Agent:
         if isinstance(tool, Agent):
             return ToolResult(
                 error=(
-                    f"tool {call.name!r} is a subagent and must be dispatched "
-                    "by the control plane"
+                    f"tool {call.name!r} is a subagent; the entrypoint "
+                    "reports it as a SubagentStart instead of executing it"
                 )
             )
         try:

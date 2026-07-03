@@ -3,7 +3,7 @@ import json
 import pytest
 from pydantic import BaseModel
 
-from axes.agent import Agent, Message, RunContext, Tool
+from axes.agent import Agent, Finish, Message, RunContext, Tool
 from axes.agent.main import _dispatch, flatten
 
 
@@ -32,18 +32,28 @@ class Leaf(Agent):
         return Message(content="leaf message")
 
 
+class TypedLeaf(Agent):
+    name = "typed_leaf"
+    prompts = []
+    arguments_schema = Args
+
+    def system_prompt(self) -> str:
+        return "You are a typed leaf."
+
+
 class Root(Agent):
     name = "root"
     prompts = []
     tools = {
         "double": Double(),
         "leaf": Leaf(),
+        "typed_leaf": TypedLeaf(),
     }
 
 
 def test_flatten_includes_subagents() -> None:
     registry = flatten(Root())
-    assert set(registry) == {"root", "leaf"}
+    assert set(registry) == {"root", "leaf", "typed_leaf"}
 
 
 def test_flatten_detects_name_collision() -> None:
@@ -68,7 +78,7 @@ async def test_dispatch_run_tool() -> None:
         }
     )
     out = json.loads(await _dispatch(raw, Root()))
-    assert out == {"content": {"y": 42}, "error": None}
+    assert out == {"kind": "tool", "content": {"y": 42}, "error": None}
 
 
 async def test_dispatch_selects_subagent_by_name() -> None:
@@ -84,7 +94,7 @@ async def test_dispatch_unknown_agent() -> None:
     assert "unknown agent" in out["error"]
 
 
-async def test_dispatch_run_tool_on_subagent_errors() -> None:
+async def test_dispatch_run_tool_on_subagent_returns_start() -> None:
     raw = json.dumps(
         {
             "verb": "run_tool",
@@ -93,5 +103,39 @@ async def test_dispatch_run_tool_on_subagent_errors() -> None:
         }
     )
     out = json.loads(await _dispatch(raw, Root()))
-    assert out["content"] is None
-    assert "subagent" in out["error"]
+    assert out["kind"] == "subagent"
+    assert out["name"] == "leaf"
+    assert out["plan"]["action"] == "message"
+    assert out["plan"]["content"] == "leaf message"
+
+
+async def test_subagent_start_plan_binds_call_arguments() -> None:
+    raw = json.dumps(
+        {
+            "verb": "run_tool",
+            "agent": "root",
+            "tool_call": {"name": "typed_leaf", "arguments": {"x": 5}},
+        }
+    )
+    out = json.loads(await _dispatch(raw, Root()))
+    assert out["kind"] == "subagent"
+    assert out["name"] == "typed_leaf"
+    assert out["plan"]["action"] == "complete"
+    assert json.loads(out["plan"]["user_message"]) == {"x": 5}
+    assert out["plan"]["messages"][-1]["role"] == "user"
+    assert json.loads(out["plan"]["messages"][-1]["content"]) == {"x": 5}
+
+
+async def test_dispatch_returns_explicit_finish_content() -> None:
+    class Explicit(Agent):
+        name = "explicit"
+        prompts = []
+        content_schema = Out
+
+        def plan_step(self, messages: list) -> Finish:
+            return Finish(content={"y": 7})
+
+    raw = json.dumps({"verb": "plan_step", "agent": "explicit"})
+    out = json.loads(await _dispatch(raw, Explicit()))
+    assert out["action"] == "finish"
+    assert out["content"] == {"y": 7}

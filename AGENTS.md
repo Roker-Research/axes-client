@@ -10,16 +10,21 @@ touching the public API surface.
 
 ## Package layout
 
+Single distribution (PyPI: `axes-client`, import: `axes`) built from a
+root-level `src/axes/` tree. The `axes.agent` framework ships in the same
+distribution as a subpackage.
+
 ```
 src/axes/
-  __init__.py      public re-exports: Client, sql, scan, sql_to_dataframe, SqlResult
+  __init__.py      public re-exports: Client, sql, SqlResult
   client.py        Client class + get_default_client() from env vars; _build_http_client()
   sql.py           sql(), SqlResult, sql_to_dataframe()
-  scan.py          scan() → pl.LazyFrame
   exceptions.py    QueryError, ResultTooLarge, AuthError, ConfigError
-  cli.py           axes sql / axes scan CLI commands
+  cli.py           axes sql / axes scan CLI commands (entry point: axes)
+  agent/           Agent, Tool, RunContext + the wire protocol (entry point: axes-agent)
 tests/
-  conftest.py      make_parquet(), SIMPLE_PARQUET fixture, client fixture
+  conftest.py        make_parquet(), SIMPLE_PARQUET fixture, client fixture
+  agent/             agent-framework tests
 ```
 
 ## Install / dev setup
