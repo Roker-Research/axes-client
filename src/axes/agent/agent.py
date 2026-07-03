@@ -240,7 +240,7 @@ class Agent:
                 )
             content = await tool.run(arguments, ctx)
         except Exception as error:  # surfaced to Chat Plot as a tool error
-            return ToolResult(error=str(error))
+            return ToolResult(error=f"{type(error).__name__}: {error}")
         if content is None:
             return ToolResult(content=None)
         if isinstance(content, BaseModel):

@@ -127,7 +127,11 @@ def main() -> None:
     try:
         out = asyncio.run(_dispatch(raw, load_root()))
     except Exception as error:
-        sys.stdout.write(ErrorEnvelope(error=str(error)).model_dump_json())
+        sys.stdout.write(
+            ErrorEnvelope(
+                error=f"{type(error).__name__}: {error}"
+            ).model_dump_json()
+        )
         sys.stdout.flush()
         raise SystemExit(1) from error
     sys.stdout.write(out)
