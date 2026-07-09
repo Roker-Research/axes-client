@@ -43,6 +43,15 @@ class PromptArgs(BaseModel):
     prompt: str
 
 
+class TextContent(BaseModel):
+    """Default output schema for an agent that declares no ``content_schema``
+    — a single free-form ``text`` string. The framework validates a
+    successful finish against this when the agent declares nothing else, so
+    every agent has a concrete output contract."""
+
+    text: str = ""
+
+
 class Agent:
     #: Stable identifier; the name Chat Plot selects with (``Chat.agent``) and
     #: by which a subagent is addressed. Defaults to the class name.

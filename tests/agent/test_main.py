@@ -1,7 +1,7 @@
 import json
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from axes.agent import Agent, Finish, Message, RunContext, Tool
 from axes.agent.main import _dispatch, flatten
@@ -124,6 +124,84 @@ async def test_subagent_start_plan_binds_call_arguments() -> None:
     assert json.loads(out["plan"]["user_message"]) == {"x": 5}
     assert out["plan"]["messages"][-1]["role"] == "user"
     assert json.loads(out["plan"]["messages"][-1]["content"]) == {"x": 5}
+
+
+async def test_describe_reports_top_level_contract() -> None:
+    class Contented(Agent):
+        name = "contented"
+        prompts = []
+        description = "does a thing"
+        arguments_schema = Args
+        content_schema = Out
+
+    out = json.loads(await _dispatch('{"verb": "describe"}', Contented()))
+    assert out["name"] == "contented"
+    assert out["description"] == "does a thing"
+    assert out["arguments_schema"]["properties"]["x"]["type"] == "integer"
+    assert out["content_schema"]["properties"]["y"]["type"] == "integer"
+
+
+async def test_describe_falls_back_to_prompt_and_text() -> None:
+    out = json.loads(await _dispatch('{"verb": "describe"}', Leaf()))
+    assert out["name"] == "leaf"
+    # No declared arguments_schema -> the PromptArgs fallback (a `prompt`).
+    assert "prompt" in out["arguments_schema"]["properties"]
+    # No declared content_schema -> the TextContent fallback (a `text`).
+    assert "text" in out["content_schema"]["properties"]
+
+
+async def test_finish_content_defaults_and_normalizes_to_text() -> None:
+    class Plain(Agent):
+        name = "plain"
+        prompts = []
+
+        def plan_step(self, messages: list) -> Finish:
+            return Finish(content={"text": "hi"})
+
+    out = json.loads(await _dispatch('{"verb": "plan_step", "agent": "plain"}', Plain()))
+    assert out["action"] == "finish"
+    assert out["content"] == {"text": "hi"}
+    assert out["error"] is None
+
+
+async def test_finish_without_content_defaults_to_empty_text() -> None:
+    class Empty(Agent):
+        name = "empty"
+        prompts = []
+
+        def plan_step(self, messages: list) -> Finish:
+            return Finish()
+
+    out = json.loads(await _dispatch('{"verb": "plan_step", "agent": "empty"}', Empty()))
+    assert out["content"] == {"text": ""}
+
+
+async def test_finish_error_bypasses_content_validation() -> None:
+    class Failing(Agent):
+        name = "failing"
+        prompts = []
+        content_schema = Out  # requires y
+
+        def plan_step(self, messages: list) -> Finish:
+            return Finish(error="get_forecast failed")
+
+    out = json.loads(await _dispatch('{"verb": "plan_step", "agent": "failing"}', Failing()))
+    assert out["action"] == "finish"
+    assert out["error"] == "get_forecast failed"
+    assert out["content"] is None
+
+
+async def test_finish_content_violating_schema_raises() -> None:
+    class Bad(Agent):
+        name = "bad"
+        prompts = []
+        content_schema = Out  # requires y: int
+
+        def plan_step(self, messages: list) -> Finish:
+            return Finish(content={"wrong": 1})
+
+    with pytest.raises(ValidationError):
+        await _dispatch('{"verb": "plan_step", "agent": "bad"}', Bad())
 
 
 async def test_dispatch_returns_explicit_finish_content() -> None:

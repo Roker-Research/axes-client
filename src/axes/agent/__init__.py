@@ -12,8 +12,10 @@ from __future__ import annotations
 from axes.agent.agent import Agent
 from axes.agent.context import RunContext
 from axes.agent.protocol import (
+    AgentContract,
     ChatMessage,
     Complete,
+    DescribeRequest,
     Finish,
     Message,
     PlanResult,
@@ -35,4 +37,6 @@ __all__ = [
     "Message",
     "Finish",
     "PlanResult",
+    "AgentContract",
+    "DescribeRequest",
 ]

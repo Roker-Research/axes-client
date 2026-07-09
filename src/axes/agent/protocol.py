@@ -135,15 +135,25 @@ class Message(BaseModel):
 
 
 class Finish(BaseModel):
-    """The agent declares the run complete."""
+    """The agent declares the run complete.
+
+    A successful finish carries ``content`` — the terminal output, which the
+    framework validates against the agent's ``content_schema`` (defaulting to
+    ``{"text": ...}``) before returning it. A failed finish carries ``error``
+    instead and bypasses that validation; the two are mutually exclusive, and
+    ``error`` is how an agent reports it could not produce a valid output.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     action: Literal["finish"] = "finish"
     reason: str | None = None
-    #: The agent's terminal output (the parent tool call content). The agent
-    #: must supply it; Chat Plot settles a contentless finish as an error.
+    #: The agent's terminal output (the parent tool call content), validated
+    #: against ``content_schema``. Left null on a failed finish.
     content: dict[str, Any] | None = None
+    #: Set instead of ``content`` when the run failed; bypasses schema
+    #: validation and settles the parent tool call as an error.
+    error: str | None = None
 
 
 type PlanResult = Annotated[
@@ -191,6 +201,28 @@ run_tool_result_adapter: TypeAdapter[RunToolResult] = TypeAdapter(
 )
 
 
+# --- describe result -------------------------------------------------------
+
+
+class AgentContract(BaseModel):
+    """The image's top-level agent contract, returned to a ``describe``.
+
+    Chat Plot stores this on the ``ExternalAgentVersion`` at build time and
+    builds the parent LLM's tool definition from it, so nothing about the
+    contract is re-declared on the Chat Plot side. Both schemas are always
+    present: ``arguments_schema`` falls back to a single ``prompt`` and
+    ``content_schema`` to a single ``text`` when the agent declares neither,
+    matching the fallbacks the framework enforces at runtime.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    description: str | None = None
+    arguments_schema: dict[str, Any]
+    content_schema: dict[str, Any]
+
+
 # --- requests (stdin) ------------------------------------------------------
 
 
@@ -216,8 +248,21 @@ class RunToolRequest(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
 
 
+class DescribeRequest(BaseModel):
+    """Ask the image to report its top-level agent contract.
+
+    Runs no step and touches no history; Chat Plot sends it once per build to
+    extract the schemas it stores on the version.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    verb: Literal["describe"] = "describe"
+
+
 type Request = Annotated[
-    PlanStepRequest | RunToolRequest, Field(discriminator="verb")
+    PlanStepRequest | RunToolRequest | DescribeRequest,
+    Field(discriminator="verb"),
 ]
 
 request_adapter: TypeAdapter[Request] = TypeAdapter(Request)

@@ -18,11 +18,14 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from axes.agent.agent import Agent
+from axes.agent.agent import Agent, PromptArgs, TextContent
 from axes.agent.context import RunContext
 from axes.agent.protocol import (
+    AgentContract,
     ChatMessage,
+    DescribeRequest,
     ErrorEnvelope,
+    Finish,
     PlanStepRequest,
     SubagentStart,
     request_adapter,
@@ -80,13 +83,43 @@ async def plan(
     messages: list[ChatMessage],
     arguments: dict[str, Any],
 ) -> BaseModel:
-    """Bind arguments and run one ``plan_step``."""
+    """Bind arguments, run one ``plan_step``, and enforce the output schema.
+
+    A successful ``Finish`` has its ``content`` validated against the agent's
+    ``content_schema`` (defaulting to ``TextContent``) and normalized to that
+    schema's serialization; a failed ``Finish`` (``error`` set) is left
+    untouched. Malformed output surfaces as a ``ValidationError`` rather than
+    flowing through as content that does not match the declared contract.
+    """
     agent.bind_arguments(arguments)
     planned: Any = agent.plan_step(messages)
     if inspect.isawaitable(planned):
         planned = await planned
     assert isinstance(planned, BaseModel)
+    if isinstance(planned, Finish) and planned.error is None:
+        schema = agent.content_schema or TextContent
+        validated = schema.model_validate(planned.content or {})
+        planned = planned.model_copy(
+            update={"content": validated.model_dump(by_alias=True)}
+        )
     return planned
+
+
+def describe(root: Agent) -> AgentContract:
+    """Report the image's top-level agent contract for registration.
+
+    Both contracts fall back to the framework defaults the runtime enforces —
+    ``PromptArgs`` (a single ``prompt``) for input, ``TextContent`` (a single
+    ``text``) for output — so ``describe`` always reports concrete schemas.
+    """
+    arguments_model = root.arguments_schema or PromptArgs
+    content_model = root.content_schema or TextContent
+    return AgentContract(
+        name=root.name,
+        description=root.description,
+        arguments_schema=arguments_model.model_json_schema(by_alias=True),
+        content_schema=content_model.model_json_schema(by_alias=True),
+    )
 
 
 async def _dispatch(raw: str, root: Agent) -> str:
@@ -97,8 +130,10 @@ async def _dispatch(raw: str, root: Agent) -> str:
     carrying the subagent's first ``plan_step`` on empty history, computed
     with the call's arguments bound.
     """
-    registry = flatten(root)
     req = request_adapter.validate_json(raw)
+    if isinstance(req, DescribeRequest):
+        return describe(root).model_dump_json()
+    registry = flatten(root)
     agent: Agent = root
     if req.agent is not None:
         selected = registry.get(req.agent)
