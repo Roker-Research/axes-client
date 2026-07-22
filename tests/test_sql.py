@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import polars as pl
 import pytest
+from conftest import SIMPLE_ARROW, make_arrow
 from pytest_httpx import HTTPXMock
 
 from axes.exceptions import AuthError, QueryError, ResultTooLarge
 from axes.sql import SqlResult, sql
-
-from conftest import SIMPLE_ARROW, SIMPLE_DATA, make_arrow
 
 
 class TestSqlSuccess:
@@ -59,33 +57,53 @@ class TestSqlOutArg:
         assert out.exists()
         assert pl.read_parquet(out).shape == (2, 2)
 
-    def test_out_returns_sql_result(self, client, httpx_mock: HTTPXMock, tmp_path):
+    def test_out_returns_sql_result(
+        self, client, httpx_mock: HTTPXMock, tmp_path
+    ):
         httpx_mock.add_response(content=SIMPLE_ARROW, status_code=200)
-        result = sql("SELECT * FROM acs.demographics", out=tmp_path / "r.parquet", client=client)
+        result = sql(
+            "SELECT * FROM acs.demographics",
+            out=tmp_path / "r.parquet",
+            client=client,
+        )
         assert isinstance(result, SqlResult)
 
     def test_out_result_metadata(self, client, httpx_mock: HTTPXMock, tmp_path):
         httpx_mock.add_response(content=SIMPLE_ARROW, status_code=200)
-        result = sql("SELECT * FROM acs.demographics", out=tmp_path / "r.parquet", client=client)
+        result = sql(
+            "SELECT * FROM acs.demographics",
+            out=tmp_path / "r.parquet",
+            client=client,
+        )
         assert result.rows == 2
         assert set(result.columns) == {"state", "income"}
         assert result.bytes > 0
 
     def test_out_result_collect(self, client, httpx_mock: HTTPXMock, tmp_path):
         httpx_mock.add_response(content=SIMPLE_ARROW, status_code=200)
-        result = sql("SELECT * FROM acs.demographics", out=tmp_path / "r.parquet", client=client)
+        result = sql(
+            "SELECT * FROM acs.demographics",
+            out=tmp_path / "r.parquet",
+            client=client,
+        )
         df = result.collect()
         assert isinstance(df, pl.DataFrame)
         assert df.shape == (2, 2)
 
     def test_out_result_scan(self, client, httpx_mock: HTTPXMock, tmp_path):
         httpx_mock.add_response(content=SIMPLE_ARROW, status_code=200)
-        result = sql("SELECT * FROM acs.demographics", out=tmp_path / "r.parquet", client=client)
+        result = sql(
+            "SELECT * FROM acs.demographics",
+            out=tmp_path / "r.parquet",
+            client=client,
+        )
         lf = result.scan()
         assert isinstance(lf, pl.LazyFrame)
         assert len(lf.collect()) == 2
 
-    def test_out_file_not_deleted_on_gc(self, client, httpx_mock: HTTPXMock, tmp_path):
+    def test_out_file_not_deleted_on_gc(
+        self, client, httpx_mock: HTTPXMock, tmp_path
+    ):
         httpx_mock.add_response(content=SIMPLE_ARROW, status_code=200)
         out = tmp_path / "r.parquet"
         result = sql("SELECT * FROM acs.demographics", out=out, client=client)
@@ -109,7 +127,9 @@ class TestSqlOutArg:
         httpx_mock.add_response(content=SIMPLE_ARROW, status_code=200)
         sql("SELECT 1", client=client)
         request = httpx_mock.get_request()
-        assert request.headers["accept"] == "application/vnd.apache.arrow.stream"
+        assert (
+            request.headers["accept"] == "application/vnd.apache.arrow.stream"
+        )
 
 
 class TestSqlResultAccessors:
@@ -132,8 +152,10 @@ class TestSqlResultAccessors:
         df = result.collect().sort("state")
         assert df["state"].to_list() == ["CA", "NY"]
 
-    def test_spilled_result_scan_returns_lazy_frame(self, client, httpx_mock: HTTPXMock):
-        """A SqlResult backed by a spill file also returns a LazyFrame from scan()."""
+    def test_spilled_result_scan_returns_lazy_frame(
+        self, client, httpx_mock: HTTPXMock
+    ):
+        """Spill-backed SqlResult also returns a LazyFrame from scan()."""
         large_data = {"state": ["CA"] * 1000, "income": [60000.0] * 1000}
         large_arrow = make_arrow(large_data)
         httpx_mock.add_response(content=large_arrow, status_code=200)
@@ -142,7 +164,9 @@ class TestSqlResultAccessors:
         assert isinstance(lf, pl.LazyFrame)
         assert len(lf.collect()) == 1000
 
-    def test_spilled_result_collect_returns_dataframe(self, client, httpx_mock: HTTPXMock):
+    def test_spilled_result_collect_returns_dataframe(
+        self, client, httpx_mock: HTTPXMock
+    ):
         large_data = {"state": ["CA"] * 1000, "income": [60000.0] * 1000}
         large_arrow = make_arrow(large_data)
         httpx_mock.add_response(content=large_arrow, status_code=200)
@@ -154,12 +178,16 @@ class TestSqlResultAccessors:
 
 class TestSqlErrors:
     def test_400_raises_query_error(self, client, httpx_mock: HTTPXMock):
-        httpx_mock.add_response(status_code=400, text="syntax error near 'FORM'")
+        httpx_mock.add_response(
+            status_code=400, text="syntax error near 'FORM'"
+        )
         with pytest.raises(QueryError, match="syntax error"):
             sql("SELECT * FORM acs.demographics", client=client)
 
     def test_413_raises_result_too_large(self, client, httpx_mock: HTTPXMock):
-        httpx_mock.add_response(status_code=413, text="result exceeded 10M rows")
+        httpx_mock.add_response(
+            status_code=413, text="result exceeded 10M rows"
+        )
         with pytest.raises(ResultTooLarge, match="10M rows"):
             sql("SELECT * FROM acs.demographics", client=client)
 

@@ -15,11 +15,12 @@ import json
 import logging
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 import click
 
 from axes.client import get_default_client
-from axes.exceptions import AxesError, AuthError, QueryError, ResultTooLarge
+from axes.exceptions import AxesError, raise_for_query_status
 from axes.sql import sql
 
 _NDJSON_MIME = "application/x-ndjson"
@@ -51,13 +52,14 @@ def main(ctx: click.Context, verbose: bool) -> None:
     default=None,
     metavar="PATH",
     help="Write result to this path as parquet and print a JSON summary. "
-         "Without this flag, rows are streamed as ndjson to stdout.",
+    "Without this flag, rows are streamed as ndjson to stdout.",
 )
 @click.option(
     "--pretty",
     is_flag=True,
     default=False,
-    help="Pretty-print JSON output with indentation. Only applies without --out.",
+    help="Pretty-print JSON output with indentation. Only applies "
+    "without --out.",
 )
 def sql_cmd(query: str, out: str | None, pretty: bool) -> None:
     """Run a SQL query and print the results.
@@ -68,7 +70,7 @@ def sql_cmd(query: str, out: str | None, pretty: bool) -> None:
 
     \b
     Examples:
-        axes sql "SELECT state, AVG(income) FROM acs.demographics GROUP BY state"
+        axes sql "SELECT state, AVG(income) FROM acs.demo GROUP BY state"
         axes sql "SELECT state FROM acs.demographics" | jq '.state'
         axes sql "SELECT * FROM acs.demographics" --out /work/result.parquet
         axes sql "SELECT state FROM acs.demographics" --pretty
@@ -108,18 +110,7 @@ def _stream_ndjson(query: str, pretty: bool) -> None:
     indent = 2 if pretty else None
 
     with client.query(query, accept=_NDJSON_MIME) as response:
-        if response.status_code == 401 or response.status_code == 403:
-            response.read()
-            raise AuthError(response.status_code, response.text)
-        if response.status_code == 400:
-            response.read()
-            raise QueryError(response.text or "Bad query", query=query)
-        if response.status_code == 413:
-            response.read()
-            raise ResultTooLarge(response.text or "Result exceeded server caps")
-        if response.status_code >= 400:
-            response.read()
-            _die(QueryError(f"HTTP {response.status_code}: {response.text}", query=query))
+        raise_for_query_status(response, query=query)
 
         for line in response.iter_lines():
             if not line:
@@ -129,6 +120,6 @@ def _stream_ndjson(query: str, pretty: bool) -> None:
             click.echo(line)
 
 
-def _die(exc: Exception) -> None:
+def _die(exc: Exception) -> NoReturn:
     click.echo(f"Error: {exc}", err=True)
     sys.exit(1)

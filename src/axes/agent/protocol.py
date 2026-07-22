@@ -196,9 +196,7 @@ type RunToolResult = Annotated[
     ToolResult | SubagentStart, Field(discriminator="kind")
 ]
 
-run_tool_result_adapter: TypeAdapter[RunToolResult] = TypeAdapter(
-    RunToolResult
-)
+run_tool_result_adapter: TypeAdapter[RunToolResult] = TypeAdapter(RunToolResult)
 
 
 # --- describe result -------------------------------------------------------

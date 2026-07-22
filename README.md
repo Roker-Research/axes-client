@@ -70,11 +70,11 @@ result = sql("SELECT * FROM american_community_survey.demographics", client=clie
 ## CLI
 
 ```sh
-# Stream rows as JSON to stdout
+# Stream rows to stdout as newline-delimited JSON (ndjson), one object per line
 axes sql "SELECT state, AVG(income) FROM american_community_survey.demographics GROUP BY state"
 
-# Pipe to jq
-axes sql "SELECT state FROM american_community_survey.demographics" | jq '.[].state'
+# Pipe to jq — each line is a standalone JSON object
+axes sql "SELECT state FROM american_community_survey.demographics" | jq '.state'
 
 # Write parquet and print a JSON summary
 axes sql "SELECT * FROM american_community_survey.demographics" --out /work/result.parquet
@@ -107,6 +107,29 @@ except AuthError as e:
     print(e.status_code)  # 401 or 403
 ```
 
+## Appending data
+
+`append_table_data` uploads a parquet file to an existing table. It needs a
+write-scoped token bound to the target dataset — the ingestion runner injects
+one as `AXES_TOKEN`; personal access tokens are read-only and raise `AuthError`.
+
+```python
+from axes import append_table_data
+
+# Accepts a polars DataFrame, a parquet path, or raw parquet bytes
+result = append_table_data("demographics", df)
+
+result.row_count           # rows written
+result.byte_count          # bytes written
+result.table_data_file_id  # id of the created file
+
+# Atomically retire this firing's earlier files instead of adding to them
+append_table_data("demographics", df, replace=True)
+```
+
+The uploaded parquet's columns must match the table's registered schema; a
+mismatch raises `WriteError` (409).
+
 ## Agent framework
 
 `axes.agent` is the container-side framework for authoring [Chat
@@ -127,5 +150,12 @@ streaming. See [`weather-agent`](../weather-agent) for a worked example.
 
 ```sh
 uv sync
-uv run python -m pytest tests/ -v
+
+uv run task test    # pytest
+uv run task lint    # ruff check
+uv run task format  # ruff format
+uv run task check   # mypy (strict)
 ```
+
+`task fix` runs `ruff check --fix`. Linting (ruff), formatting, and strict type
+checking (mypy) all run in CI on every push and pull request.

@@ -1,13 +1,10 @@
 """
 Client — connection config and the lazily-initialised module-level default.
 
-Environment variables (sandbox):
-    AXES_SOCKET      Unix socket path  (preferred over AXES_ENDPOINT)
-    AXES_TOKEN       Short-lived JWT injected by the sandbox runtime
-
-Environment variables (external / user):
+Environment variables:
     AXES_ENDPOINT    HTTPS base URL, e.g. https://app.axes.com
-    AXES_TOKEN       Personal access token
+    AXES_TOKEN       Bearer token — a short-lived JWT injected by the sandbox
+                     runtime, or a personal access token when running externally
 """
 
 from __future__ import annotations
@@ -21,32 +18,17 @@ import httpx
 from axes.exceptions import ConfigError
 
 
-_UNIX_SOCKET_BASE_URL = "http://axes"
-
-
 def _build_http_client(
     *,
-    endpoint: str | None,
-    socket_path: str | None,
+    endpoint: str,
     token: str,
     timeout: float,
 ) -> httpx.Client:
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.apache.parquet",
-    }
-
-    if socket_path:
-        return httpx.Client(
-            base_url=_UNIX_SOCKET_BASE_URL,
-            headers=headers,
-            transport=httpx.HTTPTransport(uds=socket_path),
-            timeout=timeout,
-        )
-
+    # Every request sets its own Accept (Arrow, ndjson, or JSON) per call,
+    # so no default Accept header is needed here.
     return httpx.Client(
-        base_url=endpoint.rstrip("/"),  # type: ignore[union-attr]
-        headers=headers,
+        base_url=endpoint.rstrip("/"),
+        headers={"Authorization": f"Bearer {token}"},
         timeout=timeout,
     )
 
@@ -59,34 +41,27 @@ class Client:
     lazily-initialised default client built from environment variables.
 
     Args:
-        endpoint:    HTTPS base URL (e.g. ``https://app.axes.com``).
-                     Ignored when *socket_path* is provided.
-        socket_path: Path to the Unix domain socket exposed by the
-                     API inside sandbox containers.
-        token:       Bearer token (JWT or PAT).  Required.
-        versions:    Default version-pin dict applied to every ``sql``
-                     call unless overridden per-call.
-        timeout:     HTTP timeout in seconds (default 120).
+        endpoint: HTTPS base URL (e.g. ``https://app.axes.com``).  Required.
+        token:    Bearer token (JWT or PAT).  Required.
+        versions: Default version-pin dict applied to every ``sql``
+                  call unless overridden per-call.
+        timeout:  HTTP timeout in seconds (default 120).
     """
 
     def __init__(
         self,
         *,
-        endpoint: str | None = None,
-        socket_path: str | None = None,
+        endpoint: str,
         token: str,
         versions: dict[str, str] | None = None,
         timeout: float = 120.0,
     ) -> None:
         if not token:
             raise ConfigError("token must not be empty")
-        if not endpoint and not socket_path:
-            raise ConfigError(
-                "Provide either endpoint= (HTTPS) or socket_path= (Unix socket)."
-            )
+        if not endpoint:
+            raise ConfigError("endpoint must not be empty")
 
         self.endpoint = endpoint
-        self.socket_path = socket_path
         self.token = token
         self.versions: dict[str, str] = versions or {}
         self.timeout = timeout
@@ -102,13 +77,14 @@ class Client:
                 if self._http is None:
                     self._http = _build_http_client(
                         endpoint=self.endpoint,
-                        socket_path=self.socket_path,
                         token=self.token,
                         timeout=self.timeout,
                     )
         return self._http
 
-    def query(self, query: str, *, accept: str) -> contextlib.AbstractContextManager[httpx.Response]:
+    def query(
+        self, query: str, *, accept: str
+    ) -> contextlib.AbstractContextManager[httpx.Response]:
         """Return a streaming context manager for ``POST /api/query``.
 
         Args:
@@ -117,7 +93,8 @@ class Client:
 
         Usage::
 
-            with client.query("SELECT 1", accept="application/vnd.apache.arrow.stream") as response:
+            mime = "application/vnd.apache.arrow.stream"
+            with client.query("SELECT 1", accept=mime) as response:
                 ...
         """
         return self.http.stream(
@@ -125,6 +102,24 @@ class Client:
             "/api/query",
             json={"query": query},
             headers={"Accept": accept},
+        )
+
+    def append_table_data(self, table: str, data: bytes) -> httpx.Response:
+        """``POST /api/table-data-files`` — append parquet bytes to a table.
+
+        The target dataset is the one the token is write-scoped to (tokens
+        are minted per ingestion task; personal access tokens are
+        read-only). Returns the raw response; most callers use
+        :func:`axes.append_table_data`.
+        """
+        return self.http.post(
+            "/api/table-data-files",
+            params={"table": table},
+            content=data,
+            headers={
+                "Content-Type": "application/octet-stream",
+                "Accept": "application/json",
+            },
         )
 
     def close(self) -> None:
@@ -140,8 +135,7 @@ class Client:
         self.close()
 
     def __repr__(self) -> str:
-        transport = self.socket_path or self.endpoint
-        return f"Client(transport={transport!r})"
+        return f"Client(endpoint={self.endpoint!r})"
 
 
 # ---------------------------------------------------------------------------
@@ -166,17 +160,10 @@ def get_default_client() -> Client:
                 "Outside, set it to your personal access token."
             )
 
-        socket_path = os.environ.get("AXES_SOCKET")
         endpoint = os.environ.get("AXES_ENDPOINT", "https://app.axes.com")
-
-        if not socket_path and not endpoint:
-            raise ConfigError(
-                "Set AXES_SOCKET (Unix socket path) or AXES_ENDPOINT (HTTPS URL)."
-            )
 
         _default_client = Client(
             endpoint=endpoint,
-            socket_path=socket_path,
             token=token,
         )
     return _default_client

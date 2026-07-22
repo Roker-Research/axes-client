@@ -5,7 +5,7 @@ Usage::
 
     from axes import sql
 
-    result = sql("SELECT state, AVG(income) FROM acs.demographics GROUP BY state")
+    result = sql("SELECT state, AVG(income) FROM acs.demo GROUP BY state")
 
     result.bytes       # size of the Arrow IPC response in bytes — use this
                        # to decide whether to load into memory
@@ -29,7 +29,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from axes.client import Client, get_default_client
-from axes.exceptions import AuthError, QueryError, ResultTooLarge
+from axes.exceptions import raise_for_query_status
 
 log = logging.getLogger(__name__)
 
@@ -98,6 +98,7 @@ class SqlResult:
         dest.parent.mkdir(parents=True, exist_ok=True)
         if self._spill_path is not None:
             import shutil
+
             shutil.copy2(self._spill_path, dest)
         else:
             assert self._df is not None
@@ -169,9 +170,7 @@ def sql(
         max_size=_SPILL_THRESHOLD, dir="/tmp"
     ) as buf:
         with client.query(query, accept=_ARROW_MIME) as response:
-            if response.status_code != 200:
-                response.read()
-            _raise_for_status(response, query)
+            raise_for_query_status(response, query=query)
             for chunk in response.iter_bytes(chunk_size=_CHUNK_SIZE):
                 buf.write(chunk)
 
@@ -195,6 +194,8 @@ def sql(
             )
         else:
             df = pl.from_arrow(pa.ipc.open_stream(buf).read_all())
+            # A full Arrow Table always yields a DataFrame (never a Series).
+            assert isinstance(df, pl.DataFrame)
             return SqlResult(
                 df=df,
                 spill_path=None,
@@ -243,7 +244,7 @@ def _stream_to_parquet_file(
         def readable(self) -> bool:
             return True
 
-        def readinto(self, b: bytearray) -> int:
+        def readinto(self, b: bytearray) -> int:  # type: ignore[override]
             total = 0
             while total < len(b):
                 if not self._buf:
@@ -255,7 +256,7 @@ def _stream_to_parquet_file(
                         break
                     self._buf = chunk
                 n = min(len(b) - total, len(self._buf))
-                b[total:total + n] = self._buf[:n]
+                b[total : total + n] = self._buf[:n]
                 self._buf = self._buf[n:]
                 total += n
             return total
@@ -274,10 +275,16 @@ def _stream_to_parquet_file(
             for batch in arrow_reader:
                 if writer is None:
                     log.debug("writer thread: opening ParquetWriter")
-                    writer = pq.ParquetWriter(dest, batch.schema, compression="zstd")
+                    writer = pq.ParquetWriter(
+                        dest, batch.schema, compression="zstd"
+                    )
                 writer.write_table(pa.Table.from_batches([batch]))
                 rows += len(batch)
-                log.debug("writer thread: wrote batch rows=%d total=%d", len(batch), rows)
+                log.debug(
+                    "writer thread: wrote batch rows=%d total=%d",
+                    len(batch),
+                    rows,
+                )
         except Exception as exc:
             log.debug("writer thread: exception: %r", exc)
             error.append(exc)
@@ -294,17 +301,19 @@ def _stream_to_parquet_file(
         log.debug("http thread: opening stream request")
         with client.query(query, accept=_ARROW_MIME) as response:
             log.debug("http thread: response status=%d", response.status_code)
-            if response.status_code != 200:
-                response.read()
             try:
-                _raise_for_status(response, query)
+                raise_for_query_status(response, query=query)
             except Exception:
                 chunk_queue.put(None)
                 writer_thread.join()
                 raise
             for chunk in response.iter_bytes(chunk_size=_CHUNK_SIZE):
                 byte_count += len(chunk)
-                log.debug("http thread: got chunk size=%d total=%d", len(chunk), byte_count)
+                log.debug(
+                    "http thread: got chunk size=%d total=%d",
+                    len(chunk),
+                    byte_count,
+                )
                 chunk_queue.put(chunk)
         log.debug("http thread: stream done, total bytes=%d", byte_count)
     finally:
@@ -322,7 +331,7 @@ def _stream_to_parquet_file(
 
 def _arrow_buf_to_parquet_tempfile(buf: object) -> Path:
     """Convert an Arrow IPC stream buffer to a parquet temp file."""
-    reader = pa.ipc.open_stream(buf)  # type: ignore[arg-type]
+    reader = pa.ipc.open_stream(buf)
     tmp = tempfile.NamedTemporaryFile(
         suffix=".parquet", dir="/tmp", delete=False
     )
@@ -339,33 +348,3 @@ def _arrow_buf_to_parquet_tempfile(buf: object) -> Path:
     finally:
         tmp.close()
     return Path(tmp.name)
-
-
-def _raise_for_status(response: object, query: str) -> None:
-    """Translate HTTP error codes to typed exceptions."""
-    status = getattr(response, "status_code", None)
-    if status is None:
-        return
-
-    if status in (401, 403):
-        text = _read_text(response)
-        raise AuthError(status, text or f"HTTP {status}")
-
-    if status == 413:
-        text = _read_text(response)
-        raise ResultTooLarge(text or "Result exceeded server caps")
-
-    if status == 400:
-        text = _read_text(response)
-        raise QueryError(text or "Bad query", query=query)
-
-    if status >= 400:
-        text = _read_text(response)
-        raise QueryError(f"HTTP {status}: {text}", query=query)
-
-
-def _read_text(response: object) -> str:
-    try:
-        return response.text  # type: ignore[attr-defined]
-    except Exception:
-        return ""

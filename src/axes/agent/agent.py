@@ -244,9 +244,7 @@ class Agent:
         try:
             arguments: Any = call.arguments
             if tool.arguments_schema is not None:
-                arguments = tool.arguments_schema.model_validate(
-                    call.arguments
-                )
+                arguments = tool.arguments_schema.model_validate(call.arguments)
             content = await tool.run(arguments, ctx)
         except Exception as error:  # surfaced to Chat Plot as a tool error
             return ToolResult(error=f"{type(error).__name__}: {error}")

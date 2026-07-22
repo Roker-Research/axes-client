@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "axes-client"
-version = "0.3.0"
+version = "0.4.0"
 description = "Python client for the Axes data API, and the axes.agent framework"
 readme = "README.md"
 authors = [
@@ -41,4 +41,53 @@ dev = [
     "pytest",
     "pytest-httpx",
     "pytest-asyncio",
+    "ruff>=0.14.2",
+    "mypy>=1.18.2",
+    "taskipy>=1.14.1",
 ]
+
+[tool.taskipy.tasks]
+lint = "ruff check ."
+fix = "ruff check --fix ."
+format = "ruff format ."
+check = "mypy src tests"
+test = "pytest tests/"
+
+[tool.ruff]
+line-length = 80
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+strict = true
+mypy_path = "src"
+explicit_package_bases = true
+# pyarrow ships partial, largely-untyped type info; allow calls into it
+# without tripping strict's disallow-untyped-calls.
+untyped_calls_exclude = ["pyarrow"]
+
+# Test code is checked, but strict's stricter demands (full annotations, no
+# untyped calls, resolving the flat `from conftest import ...` helper) add
+# friction without much payoff — mirror chat-plot and relax them for tests.
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disable_error_code = [
+    "no-untyped-def",
+    "no-untyped-call",
+    "attr-defined",
+    "arg-type",
+    "type-arg",
+    "union-attr",
+    "import-not-found",
+]
+
+[[tool.mypy.overrides]]
+module = ["pyarrow.*"]
+ignore_missing_imports = true

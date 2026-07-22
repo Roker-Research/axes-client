@@ -4,17 +4,17 @@ from __future__ import annotations
 
 import io
 import json
+
 import polars as pl
-import pyarrow as pa
 import pyarrow.ipc as pa_ipc
 import pytest
 
 from axes.client import Client
 
-
 # ---------------------------------------------------------------------------
 # Fixture factories
 # ---------------------------------------------------------------------------
+
 
 def make_arrow(data: dict) -> bytes:
     """Return Arrow IPC stream bytes for a dict of {col: [values]}."""
@@ -53,6 +53,7 @@ SIMPLE_NDJSON = make_ndjson(SIMPLE_DATA)
 # ---------------------------------------------------------------------------
 # Client fixture (HTTPS, no real network)
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def client():

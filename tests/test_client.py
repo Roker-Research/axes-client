@@ -14,19 +14,13 @@ class TestClientInit:
         with pytest.raises(ConfigError, match="token"):
             Client(endpoint="http://axes", token="")
 
-    def test_requires_transport(self):
+    def test_requires_endpoint(self):
         with pytest.raises(ConfigError, match="endpoint"):
-            Client(token="tok")
+            Client(endpoint="", token="tok")
 
     def test_endpoint_ok(self):
         client = Client(endpoint="http://axes", token="tok")
         assert client.endpoint == "http://axes"
-        assert client.socket_path is None
-
-    def test_socket_ok(self):
-        client = Client(socket_path="/run/axes/api.sock", token="tok")
-        assert client.socket_path == "/run/axes/api.sock"
-        assert client.endpoint is None
 
     def test_default_versions_empty(self):
         client = Client(endpoint="http://axes", token="tok")
@@ -55,25 +49,15 @@ class TestGetDefaultClient:
 
     def test_default_endpoint(self, monkeypatch):
         monkeypatch.setenv("AXES_TOKEN", "tok")
-        monkeypatch.delenv("AXES_SOCKET", raising=False)
         monkeypatch.delenv("AXES_ENDPOINT", raising=False)
         client = get_default_client()
         assert client.endpoint == "https://app.axes.com"
 
-    def test_prefers_socket_over_endpoint(self, monkeypatch):
+    def test_endpoint_from_env(self, monkeypatch):
         monkeypatch.setenv("AXES_TOKEN", "tok")
-        monkeypatch.setenv("AXES_SOCKET", "/run/axes/api.sock")
-        monkeypatch.setenv("AXES_ENDPOINT", "http://axes")
-        client = get_default_client()
-        assert client.socket_path == "/run/axes/api.sock"
-
-    def test_endpoint_only(self, monkeypatch):
-        monkeypatch.setenv("AXES_TOKEN", "tok")
-        monkeypatch.delenv("AXES_SOCKET", raising=False)
         monkeypatch.setenv("AXES_ENDPOINT", "http://axes")
         client = get_default_client()
         assert client.endpoint == "http://axes"
-        assert client.socket_path is None
 
     def test_returns_same_instance(self, monkeypatch):
         monkeypatch.setenv("AXES_TOKEN", "tok")

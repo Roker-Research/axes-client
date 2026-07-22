@@ -6,11 +6,10 @@ import json
 
 import pytest
 from click.testing import CliRunner
+from conftest import SIMPLE_ARROW, SIMPLE_NDJSON
 from pytest_httpx import HTTPXMock
 
 from axes.cli import main
-
-from conftest import SIMPLE_ARROW, SIMPLE_NDJSON
 
 
 @pytest.fixture()
@@ -24,6 +23,7 @@ def _set_env(monkeypatch):
     monkeypatch.setenv("AXES_TOKEN", "cli-test-token")
     monkeypatch.setenv("AXES_ENDPOINT", "http://axes-test")
     import axes.client as _c
+
     _c._default_client = None
 
 
@@ -37,7 +37,7 @@ class TestSqlCmd:
         """Without --out, stdout is ndjson — one JSON object per line."""
         httpx_mock.add_response(content=SIMPLE_NDJSON, status_code=200)
         result = runner.invoke(main, ["sql", "SELECT * FROM acs.demographics"])
-        lines = [l for l in result.output.splitlines() if l]
+        lines = [ln for ln in result.output.splitlines() if ln]
         assert len(lines) == 2
         row0 = json.loads(lines[0])
         row1 = json.loads(lines[1])
@@ -74,12 +74,20 @@ class TestSqlCmd:
         # Pretty output spans multiple lines per object — more lines than rows.
         assert result.output.count("\n") > 2
 
-    def test_pretty_with_out_indents_summary(self, runner, httpx_mock: HTTPXMock, tmp_path):
+    def test_pretty_with_out_indents_summary(
+        self, runner, httpx_mock: HTTPXMock, tmp_path
+    ):
         httpx_mock.add_response(content=SIMPLE_ARROW, status_code=200)
         out = tmp_path / "result.parquet"
         result = runner.invoke(
             main,
-            ["sql", "SELECT * FROM acs.demographics", "--out", str(out), "--pretty"],
+            [
+                "sql",
+                "SELECT * FROM acs.demographics",
+                "--out",
+                str(out),
+                "--pretty",
+            ],
         )
         assert result.exit_code == 0
         data = json.loads(result.output)

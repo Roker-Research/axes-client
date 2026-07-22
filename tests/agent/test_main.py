@@ -158,7 +158,9 @@ async def test_finish_content_defaults_and_normalizes_to_text() -> None:
         def plan_step(self, messages: list) -> Finish:
             return Finish(content={"text": "hi"})
 
-    out = json.loads(await _dispatch('{"verb": "plan_step", "agent": "plain"}', Plain()))
+    out = json.loads(
+        await _dispatch('{"verb": "plan_step", "agent": "plain"}', Plain())
+    )
     assert out["action"] == "finish"
     assert out["content"] == {"text": "hi"}
     assert out["error"] is None
@@ -172,7 +174,9 @@ async def test_finish_without_content_defaults_to_empty_text() -> None:
         def plan_step(self, messages: list) -> Finish:
             return Finish()
 
-    out = json.loads(await _dispatch('{"verb": "plan_step", "agent": "empty"}', Empty()))
+    out = json.loads(
+        await _dispatch('{"verb": "plan_step", "agent": "empty"}', Empty())
+    )
     assert out["content"] == {"text": ""}
 
 
@@ -185,7 +189,9 @@ async def test_finish_error_bypasses_content_validation() -> None:
         def plan_step(self, messages: list) -> Finish:
             return Finish(error="get_forecast failed")
 
-    out = json.loads(await _dispatch('{"verb": "plan_step", "agent": "failing"}', Failing()))
+    out = json.loads(
+        await _dispatch('{"verb": "plan_step", "agent": "failing"}', Failing())
+    )
     assert out["action"] == "finish"
     assert out["error"] == "get_forecast failed"
     assert out["content"] is None

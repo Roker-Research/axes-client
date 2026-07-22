@@ -56,12 +56,10 @@ running server, no GCS, no real network.
 
 | Var | Purpose |
 |---|---|
-| `AXES_SOCKET` | Unix socket path (preferred over AXES_ENDPOINT; set in sandbox) |
-| `AXES_ENDPOINT` | HTTPS base URL for external/user use |
+| `AXES_ENDPOINT` | HTTPS base URL; defaults to `https://app.axes.com` |
 | `AXES_TOKEN` | JWT (sandbox, injected automatically) or PAT (external users) |
 | `AXES_CACHE_DIR` | Directory for parquet tempfiles; defaults to `~/.cache/axes/` |
 
-Library prefers `AXES_SOCKET` over `AXES_ENDPOINT` when both are set.
 The module-level default `Client` is lazily initialised from these vars on
 first call to `sql()`/`scan()`; tests reset it via `axes.client._default_client = None`.
 

@@ -23,9 +23,12 @@ from axes.agent.context import RunContext
 from axes.agent.protocol import (
     AgentContract,
     ChatMessage,
+    Complete,
     DescribeRequest,
     ErrorEnvelope,
     Finish,
+    Message,
+    PlanResult,
     PlanStepRequest,
     SubagentStart,
     request_adapter,
@@ -49,7 +52,8 @@ def load_root() -> Agent:
         sys.path.insert(0, cwd)
     name, _, attr = os.environ.get("AXES_AGENT", DEFAULT_ROOT).partition(":")
     obj = getattr(import_module(name), attr or "root")
-    root: Agent = obj() if inspect.isclass(obj) else obj
+    root = obj() if inspect.isclass(obj) else obj
+    assert isinstance(root, Agent)
     return root
 
 
@@ -82,7 +86,7 @@ async def plan(
     agent: Agent,
     messages: list[ChatMessage],
     arguments: dict[str, Any],
-) -> BaseModel:
+) -> PlanResult:
     """Bind arguments, run one ``plan_step``, and enforce the output schema.
 
     A successful ``Finish`` has its ``content`` validated against the agent's
@@ -95,14 +99,15 @@ async def plan(
     planned: Any = agent.plan_step(messages)
     if inspect.isawaitable(planned):
         planned = await planned
-    assert isinstance(planned, BaseModel)
-    if isinstance(planned, Finish) and planned.error is None:
+    assert isinstance(planned, (Complete, Message, Finish))
+    result: PlanResult = planned
+    if isinstance(result, Finish) and result.error is None:
         schema = agent.content_schema or TextContent
-        validated = schema.model_validate(planned.content or {})
-        planned = planned.model_copy(
+        validated = schema.model_validate(result.content or {})
+        result = result.model_copy(
             update={"content": validated.model_dump(by_alias=True)}
         )
-    return planned
+    return result
 
 
 def describe(root: Agent) -> AgentContract:
