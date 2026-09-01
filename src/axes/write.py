@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import polars as pl
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 from axes.client import Client, get_default_client
 from axes.exceptions import AuthError, WriteError
@@ -37,7 +39,7 @@ class AppendResult:
 
 def append_table_data(
     table: str,
-    parquet: str | Path | bytes | pl.DataFrame,
+    parquet: str | Path | bytes | pl.DataFrame | pa.Table,
     *,
     client: Client | None = None,
 ) -> AppendResult:
@@ -45,8 +47,11 @@ def append_table_data(
 
     Args:
         table:   Table name within the dataset's writable version.
-        parquet: A parquet file path, raw parquet bytes, or a polars
-                 DataFrame (serialized to parquet in memory).
+        parquet: A parquet file path, raw parquet bytes, a polars
+                 DataFrame, or a pyarrow Table (serialized to parquet in
+                 memory). Pass a pyarrow Table cast to
+                 :func:`axes.table_schema` when the registered types
+                 differ from the ones a reader infers.
         client:  Optional explicit client; defaults to the env-configured
                  module client.
 
@@ -77,11 +82,17 @@ def append_table_data(
     )
 
 
-def _parquet_bytes(parquet: str | Path | bytes | pl.DataFrame) -> bytes:
+def _parquet_bytes(
+    parquet: str | Path | bytes | pl.DataFrame | pa.Table,
+) -> bytes:
     if isinstance(parquet, bytes):
         return parquet
     if isinstance(parquet, pl.DataFrame):
         buffer = io.BytesIO()
         parquet.write_parquet(buffer)
+        return buffer.getvalue()
+    if isinstance(parquet, pa.Table):
+        buffer = io.BytesIO()
+        pq.write_table(parquet, buffer)
         return buffer.getvalue()
     return Path(parquet).read_bytes()

@@ -53,6 +53,14 @@ class ConfigError(AxesError):
     """The client is not configured correctly (missing env vars, etc.)."""
 
 
+class SchemaError(AxesError):
+    """A table's registered schema could not be resolved.
+
+    Either no table of that name is in the token's scope, or it carries a
+    column type this client cannot turn back into an arrow type.
+    """
+
+
 class WriteError(AxesError):
     """The server rejected a table-data write.
 

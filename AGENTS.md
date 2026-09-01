@@ -16,10 +16,13 @@ distribution as a subpackage.
 
 ```
 src/axes/
-  __init__.py      public re-exports: Client, sql, SqlResult
+  __init__.py      public re-exports: Client, sql, SqlResult, append_table_data, table_schema
   client.py        Client class + get_default_client() from env vars; _build_http_client()
   sql.py           sql(), SqlResult, sql_to_dataframe()
-  exceptions.py    QueryError, ResultTooLarge, AuthError, ConfigError
+  write.py         append_table_data() — the ingestion write path
+  schema.py        table_schema() — a table's registered arrow schema
+  task.py          read_payload(), write_output() for ingestion tasks
+  exceptions.py    QueryError, ResultTooLarge, AuthError, ConfigError, WriteError, SchemaError
   cli.py           axes sql / axes scan CLI commands (entry point: axes)
   agent/           Agent, Tool, RunContext + the wire protocol (entry point: axes-agent)
 tests/

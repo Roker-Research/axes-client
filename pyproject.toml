@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "axes-client"
-version = "0.4.0"
+version = "0.5.0"
 description = "Python client for the Axes data API, and the axes.agent framework"
 readme = "README.md"
 authors = [

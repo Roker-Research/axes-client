@@ -51,6 +51,18 @@ class TestAppendTableData:
         frame = pl.read_parquet(bytes(request.content))
         assert frame.to_dict(as_series=False) == SIMPLE_DATA
 
+    def test_appends_arrow_table(self, client, httpx_mock):
+        """The shape a script has after casting to table_schema()."""
+        httpx_mock.add_response(method="POST", url=_URL, json=_SUCCESS_BODY)
+
+        append_table_data(
+            "income", pl.DataFrame(SIMPLE_DATA).to_arrow(), client=client
+        )
+
+        request = httpx_mock.get_request()
+        frame = pl.read_parquet(bytes(request.content))
+        assert frame.to_dict(as_series=False) == SIMPLE_DATA
+
     def test_appends_path(self, client, httpx_mock, tmp_path):
         parquet_path = tmp_path / "chunk.parquet"
         parquet_path.write_bytes(SIMPLE_PARQUET)

@@ -7,6 +7,7 @@ The ``axes.agent`` framework ships in this same distribution as a subpackage.
 """
 
 from axes.client import Client
+from axes.schema import table_schema
 from axes.sql import SqlResult, sql
 from axes.write import AppendResult, append_table_data
 
@@ -16,4 +17,5 @@ __all__ = [
     "SqlResult",
     "append_table_data",
     "sql",
+    "table_schema",
 ]
